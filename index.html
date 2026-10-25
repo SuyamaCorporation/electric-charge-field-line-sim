@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Electric Field Simulator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #05050f; }
+  canvas { cursor: crosshair; }
+  input[type=range] { accent-color: #facc15; }
+</style>
+</head>
+<body class="min-h-screen flex flex-col items-center text-gray-100">
+<h1 class="text-2xl font-bold text-yellow-400 mt-4 mb-2 tracking-wide">Electric Charge Field Simulator</h1>
+<div class="flex flex-col md:flex-row gap-4 w-full max-w-5xl px-4 pb-6">
+  <div class="flex-1 relative">
+    <canvas id="c" class="rounded-xl border border-yellow-900 shadow-2xl w-full block"></canvas>
+  </div>
+  <div class="md:w-56 flex flex-col gap-3 bg-gray-900 rounded-xl p-4 border border-gray-700">
+    <div>
+      <label class="text-xs text-gray-400 uppercase tracking-wider">Mode</label>
+      <div class="flex gap-2 mt-2">
+        <button id="posBtn" class="flex-1 bg-red-700 hover:bg-red-600 text-white text-sm py-2 rounded-lg transition ring-2 ring-red-400 font-bold">+ Pos</button>
+        <button id="negBtn" class="flex-1 bg-blue-700 hover:bg-blue-600 text-white text-sm py-2 rounded-lg transition font-bold">− Neg</button>
+      </div>
+    </div>
+    <div class="border-t border-gray-700 pt-2">
+      <label class="flex items-center gap-2 text-sm cursor-pointer">
+        <input type="checkbox" id="showArrows" class="accent-yellow-400"> Vector Arrows
+      </label>
+      <label class="flex items-center gap-2 text-sm cursor-pointer mt-1">
+        <input type="checkbox" id="showEqui" checked class="accent-yellow-400"> Equipotential Lines
+      </label>
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 uppercase tracking-wider">Field Line Density</label>
+      <input type="range" id="lineDensity" min="8" max="28" step="2" value="16" class="w-full mt-1">
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 uppercase tracking-wider">Charge Magnitude</label>
+      <input type="range" id="chargeMag" min="1" max="5" step="0.5" value="2" class="w-full mt-1">
+    </div>
+    <button id="clearBtn" class="bg-gray-700 hover:bg-gray-600 text-sm py-2 rounded-lg transition">Clear All</button>
+    <div class="border-t border-gray-700 pt-2 text-xs text-gray-500 space-y-1">
+      <p>Click canvas to place charge</p>
+      <p>Drag charges to move them</p>
+      <p class="mt-1 text-red-400">● Positive charge</p>
+      <p class="text-blue-400">● Negative charge</p>
+    </div>
+    <div id="chargeList" class="border-t border-gray-700 pt-2 text-xs text-gray-500 max-h-32 overflow-y-auto"></div>
+  </div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  const w = Math.min(canvas.parentElement.clientWidth, 700);
+  W = canvas.width = w;
+  H = canvas.height = Math.min(window.innerHeight * 0.75, w * 0.8);
+  canvas.style.width = w + 'px';
+  canvas.style.height = H + 'px';
+}
+resize();
+window.addEventListener('resize', () => { resize(); redraw(); });
+
+let charges = [];
+let mode = 'pos';
+let draggingCharge = null;
+let dragOffX = 0, dragOffY = 0;
+
+document.getElementById('posBtn').addEventListener('click', () => {
+  mode = 'pos';
+  document.getElementById('posBtn').classList.add('ring-2','ring-red-400');
+  document.getElementById('negBtn').classList.remove('ring-2','ring-blue-400');
+});
+document.getElementById('negBtn').addEventListener('click', () => {
+  mode = 'neg';
+  document.getElementById('negBtn').classList.add('ring-2','ring-blue-400');
+  document.getElementById('posBtn').classList.remove('ring-2','ring-red-400');
+});
+
+function getCanvasPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width, scaleY = H / rect.height;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+}
+
+function hitCharge(x, y) {
+  for (let i = charges.length - 1; i >= 0; i--) {
+    const c = charges[i];
+    const dx = x - c.x, dy = y - c.y;
+    if (dx*dx + dy*dy < 18*18) return i;
+  }
+  return -1;
+}
+
+canvas.addEventListener('mousedown', e => {
+  const { x, y } = getCanvasPos(e);
+  const hit = hitCharge(x, y);
+  if (hit >= 0) {
+    draggingCharge = hit;
+    dragOffX = x - charges[hit].x;
+    dragOffY = y - charges[hit].y;
+  } else {
+    const mag = parseFloat(document.getElementById('chargeMag').value);
+    charges.push({ x, y, sign: mode === 'pos' ? 1 : -1, mag });
+    updateChargeList();
+    redraw();
+  }
+});
+canvas.addEventListener('mousemove', e => {
+  if (draggingCharge === null) return;
+  const { x, y } = getCanvasPos(e);
+  charges[draggingCharge].x = x - dragOffX;
+  charges[draggingCharge].y = y - dragOffY;
+  redraw();
+});
+canvas.addEventListener('mouseup', () => { draggingCharge = null; });
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const { x, y } = getCanvasPos(e);
+  const hit = hitCharge(x, y);
+  if (hit >= 0) { draggingCharge = hit; dragOffX = x - charges[hit].x; dragOffY = y - charges[hit].y; }
+  else { const mag = parseFloat(document.getElementById('chargeMag').value); charges.push({ x, y, sign: mode === 'pos' ? 1 : -1, mag }); updateChargeList(); redraw(); }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (draggingCharge === null) return;
+  const { x, y } = getCanvasPos(e);
+  charges[draggingCharge].x = x - dragOffX;
+  charges[draggingCharge].y = y - dragOffY;
+  redraw();
+}, { passive: false });
+canvas.addEventListener('touchend', () => { draggingCharge = null; });
+
+document.getElementById('clearBtn').addEventListener('click', () => { charges = []; updateChargeList(); redraw(); });
+document.getElementById('showArrows').addEventListener('change', redraw);
+document.getElementById('showEqui').addEventListener('change', redraw);
+document.getElementById('lineDensity').addEventListener('input', redraw);
+
+function electricField(x, y) {
+  let ex = 0, ey = 0;
+  for (const c of charges) {
+    const dx = x - c.x, dy = y - c.y;
+    const r2 = dx*dx + dy*dy;
+    if (r2 < 1) continue;
+    const r = Math.sqrt(r2);
+    const k = c.sign * c.mag / (r2 * r);
+    ex += k * dx;
+    ey += k * dy;
+  }
+  return { ex, ey };
+}
+
+function potential(x, y) {
+  let v = 0;
+  for (const c of charges) {
+    const dx = x - c.x, dy = y - c.y;
+    const r = Math.sqrt(dx*dx + dy*dy);
+    if (r < 1) continue;
+    v += c.sign * c.mag / r;
+  }
+  return v;
+}
+
+function traceFieldLine(startX, startY, sign) {
+  const steps = 800, dt = 2.5;
+  const path = [{ x: startX, y: startY }];
+  let x = startX, y = startY;
+  for (let i = 0; i < steps; i++) {
+    const { ex, ey } = electricField(x, y);
+    const mag = Math.sqrt(ex*ex + ey*ey);
+    if (mag < 1e-8) break;
+    x += sign * (ex / mag) * dt;
+    y += sign * (ey / mag) * dt;
+    if (x < 0 || x > W || y < 0 || y > H) break;
+    path.push({ x, y });
+    let absorbed = false;
+    for (const c of charges) {
+      if (c.sign !== sign) {
+        const dx = x - c.x, dy = y - c.y;
+        if (dx*dx + dy*dy < 12*12) { absorbed = true; break; }
+      }
+    }
+    if (absorbed) break;
+  }
+  return path;
+}
+
+function drawArrow(x, y, ex, ey) {
+  const len = 14;
+  const mag = Math.sqrt(ex*ex + ey*ey);
+  if (mag < 1e-8) return;
+  const nx = ex / mag, ny = ey / mag;
+  const tx = x + nx * len, ty = y + ny * len;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(tx, ty);
+  const hw = 4, hl = 7;
+  const px = -ny, py = nx;
+  ctx.moveTo(tx, ty);
+  ctx.lineTo(tx - nx*hl + px*hw, ty - ny*hl + py*hw);
+  ctx.moveTo(tx, ty);
+  ctx.lineTo(tx - nx*hl - px*hw, ty - ny*hl - py*hw);
+  ctx.stroke();
+}
+
+function redraw() {
+  ctx.clearRect(0, 0, W, H);
+
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, '#05050f');
+  bgGrad.addColorStop(1, '#0a0820');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  const showEqui = document.getElementById('showEqui').checked;
+  const showArrows = document.getElementById('showArrows').checked;
+  const linesPerCharge = parseInt(document.getElementById('lineDensity').value);
+
+  if (charges.length > 0 && showEqui) {
+    const levels = [];
+    for (let l = -8; l <= 8; l += 0.5) if (l !== 0) levels.push(l);
+    const step = Math.max(3, Math.floor(Math.min(W, H) / 120));
+    ctx.strokeStyle = 'rgba(100,200,255,0.25)';
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([4, 6]);
+    for (let py = 0; py < H; py += step) {
+      let prevSign = null;
+      for (let px = 0; px < W; px += step) {
+        const v = potential(px, py);
+        for (const lv of levels) {
+          const v2 = potential(px + step, py);
+          if ((v - lv) * (v2 - lv) < 0) {
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px + step, py + step * 0.3);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+    ctx.setLineDash([]);
+  }
+
+  for (const c of charges) {
+    if (c.sign > 0) {
+      const numLines = linesPerCharge;
+      for (let i = 0; i < numLines; i++) {
+        const angle = (2 * Math.PI * i) / numLines;
+        const startX = c.x + Math.cos(angle) * 16;
+        const startY = c.y + Math.sin(angle) * 16;
+        const path = traceFieldLine(startX, startY, 1);
+        if (path.length < 2) continue;
+        const grad = ctx.createLinearGradient(path[0].x, path[0].y, path[path.length-1].x, path[path.length-1].y);
+        grad.addColorStop(0, 'rgba(255,80,80,0.9)');
+        grad.addColorStop(0.5, 'rgba(255,220,80,0.7)');
+        grad.addColorStop(1, 'rgba(80,120,255,0.8)');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(path[0].x, path[0].y);
+        for (const p of path) ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+
+        if (path.length > 20) {
+          const midIdx = Math.floor(path.length * 0.5);
+          const p1 = path[midIdx-1], p2 = path[midIdx+1];
+          const dx = p2.x - p1.x, dy = p2.y - p1.y;
+          const mag = Math.sqrt(dx*dx + dy*dy);
+          if (mag > 0) {
+            const nx = dx/mag, ny = dy/mag;
+            const ax = path[midIdx].x, ay = path[midIdx].y;
+            ctx.save();
+            ctx.translate(ax, ay);
+            ctx.rotate(Math.atan2(ny, nx));
+            ctx.fillStyle = 'rgba(255,220,80,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(5, 0);
+            ctx.lineTo(-3, 4);
+            ctx.lineTo(-3, -4);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+      }
+    }
+  }
+
+  if (showArrows && charges.length > 0) {
+    const gridS = Math.max(24, Math.floor(Math.min(W, H) / 20));
+    ctx.strokeStyle = 'rgba(255,255,120,0.5)';
+    ctx.lineWidth = 1;
+    for (let py = gridS; py < H; py += gridS) {
+      for (let px = gridS; px < W; px += gridS) {
+        const { ex, ey } = electricField(px, py);
+        drawArrow(px, py, ex, ey);
+      }
+    }
+  }
+
+  for (const c of charges) {
+    const isPos = c.sign > 0;
+    const r = 10 + c.mag * 2;
+
+    const grd = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r * 2.5);
+    grd.addColorStop(0, isPos ? 'rgba(255,100,100,0.6)' : 'rgba(100,150,255,0.6)');
+    grd.addColorStop(1, 'transparent');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = isPos ? '#ef4444' : '#3b82f6';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = isPos ? '#fca5a5' : '#93c5fd';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = 'white';
+    ctx.font = `bold ${r * 1.2}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(isPos ? '+' : '−', c.x, c.y);
+  }
+}
+
+function updateChargeList() {
+  const el = document.getElementById('chargeList');
+  el.innerHTML = charges.length === 0 ? '<p>No charges placed</p>' :
+    charges.map((c, i) => `<div class="flex justify-between items-center"><span class="${c.sign > 0 ? 'text-red-400' : 'text-blue-400'}">${c.sign > 0 ? '+' : '−'} q=${c.mag}</span><button onclick="removeCharge(${i})" class="text-gray-600 hover:text-red-400 ml-2">✕</button></div>`).join('');
+}
+
+window.removeCharge = i => { charges.splice(i, 1); updateChargeList(); redraw(); };
+
+redraw();
+</script>
+</body>
+</html>
